@@ -341,6 +341,7 @@ header{background:var(--brown);padding:18px 32px;display:flex;align-items:center
     <select id="iPkg">
       <option>Basic</option><option>Motion</option><option>Plus</option>
     </select>
+    <div id="add-err" style="display:none;color:#b74040;font-size:12px;margin-top:8px;padding:8px 12px;background:#fdf0f0;border-radius:6px"></div>
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="closeModal('addModal')">cancelar</button>
       <button class="btn btn-primary" onclick="addProject()">criar projeto</button>
@@ -480,12 +481,23 @@ let unsubscribe=null; // firestore listener
 
 // ── FIRESTORE HELPERS ──
 async function fsLoadAll(){
-  const snap = await db.collection('projects').get();
-  projects = snap.docs.map(d=>({id:d.id,...d.data()}));
-  // load files for all projects
-  for(const proj of projects){
-    const fsnap = await db.collection('projects').doc(proj.id).collection('files').get();
-    files[proj.id] = fsnap.docs.map(d=>({id:d.id,...d.data()}));
+  try{
+    const snap = await db.collection('projects').get();
+    projects = snap.docs.map(d=>({id:d.id,...d.data()}));
+    for(const proj of projects){
+      try{
+        const fsnap = await db.collection('projects').doc(proj.id).collection('files').get();
+        files[proj.id] = fsnap.docs.map(d=>({id:d.id,...d.data()}));
+      }catch(e){ files[proj.id]=[]; }
+    }
+  }catch(err){
+    console.error('Erro ao carregar projetos:',err);
+    // Fallback: show rules error hint in board area
+    document.getElementById('board').innerHTML=`<div style="padding:32px;color:#b74040;font-size:13px;font-family:Inter,sans-serif;max-width:500px;line-height:1.7">
+      <strong>Erro de permissão no Firebase.</strong><br>
+      Vá em <b>Firestore Database → Regras</b> e publique:<br>
+      <code style="background:#fdf0f0;padding:8px 12px;border-radius:6px;display:block;margin-top:8px;font-size:12px">allow read, write: if true;</code>
+    </div>`;
   }
 }
 
@@ -584,12 +596,24 @@ async function addProject(){
   const d=document.getElementById('iDate').value.trim()||'—';
   const pk=document.getElementById('iPkg').value;
   if(!c){document.getElementById('iClient').focus();return;}
-  const id=Date.now().toString();
-  const proj={id,client:c,date:d,pkg:pk,stage:'briefing'};
-  projects.push(proj);
-  files[id]=[];
-  await fsSaveProject(proj);
-  closeModal('addModal');render();
+  const btn=document.querySelector('#addModal .btn-primary');
+  btn.textContent='salvando...';btn.disabled=true;
+  try{
+    const id=Date.now().toString();
+    const proj={id,client:c,date:d,pkg:pk,stage:'briefing'};
+    await fsSaveProject(proj);
+    projects.push(proj);
+    files[id]=[];
+    closeModal('addModal');
+    render();
+    toast('projeto criado ✓');
+  }catch(err){
+    console.error('Erro ao criar projeto:',err);
+    document.getElementById('add-err').style.display='block';
+    document.getElementById('add-err').textContent='erro ao salvar: '+err.message;
+  }finally{
+    btn.textContent='criar projeto';btn.disabled=false;
+  }
 }
 async function delProject(id){
   const proj=projects.find(p=>p.id===id);
