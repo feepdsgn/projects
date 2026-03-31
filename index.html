@@ -525,7 +525,7 @@ async function fsDeleteFile(pid, fid){
 }
 
 // Real-time listener for a single project (client view)
-function listenProject(pid){
+async function listenProject(pid){
   if(unsubscribe) unsubscribe();
   unsubscribe = db.collection('projects').doc(pid).onSnapshot(async snap=>{
     if(!snap.exists){return;}
@@ -615,7 +615,7 @@ async function addProject(){
     btn.textContent='criar projeto';btn.disabled=false;
   }
 }
-async function delProject(id){
+async async function delProject(id){
   const proj=projects.find(p=>p.id===id);
   if(!proj)return;
   showConfirm('Remover projeto de '+proj.client+'?', async()=>{
@@ -694,7 +694,7 @@ function renderQueue(){
   });
 }
 function rmQueue(i){queue.splice(i,1);renderQueue();}
-async function saveQueue(){
+async async function saveQueue(){
   if(!queue.length){closeModal('filesModal');return;}
   const bar=document.getElementById('uploadBar');
   if(!files[activePid])files[activePid]=[];
@@ -710,21 +710,30 @@ async function saveQueue(){
   bar.style.width='100%';queue=[];
   setTimeout(()=>{bar.style.width='0';document.getElementById('queueList').innerHTML='';renderMfList();render();},500);
 }
-async function addUrlFile(){
+async async function addUrlFile(){
   const name=document.getElementById('urlName').value.trim();
   const url=document.getElementById('urlLink').value.trim();
   if(!name){document.getElementById('urlName').focus();return;}
   if(!url||!url.startsWith('http')){document.getElementById('urlLink').focus();return;}
-  if(!files[activePid])files[activePid]=[];
-  const f={id:Date.now().toString(),name,cat:selCat,type:'url',size:0,data:url,isUrl:true};
-  files[activePid].push(f);
-  await fsSaveFile(activePid,f);
-  document.getElementById('urlName').value='';
-  document.getElementById('urlLink').value='';
-  renderMfList();render();
-  toast('link adicionado ✓');
+  const addBtn=document.querySelector('#clientUpload button');
+  if(addBtn){addBtn.textContent='salvando...';addBtn.disabled=true;}
+  try{
+    if(!files[activePid])files[activePid]=[];
+    const f={id:Date.now().toString(),name,cat:selCat,type:'url',size:0,data:url,isUrl:true};
+    await fsSaveFile(activePid,f);
+    files[activePid].push(f);
+    document.getElementById('urlName').value='';
+    document.getElementById('urlLink').value='';
+    renderMfList();render();
+    toast('link adicionado ✓');
+  }catch(err){
+    console.error('Erro ao salvar link:',err);
+    toast('erro ao salvar: '+err.message);
+  }finally{
+    if(addBtn){addBtn.textContent='+ adicionar link';addBtn.disabled=false;}
+  }
 }
-async function delFile(pid,fid){
+async async function delFile(pid,fid){
   if(!files[pid])return;
   files[pid]=files[pid].filter(f=>f.id!==fid);
   await fsDeleteFile(pid,fid);
