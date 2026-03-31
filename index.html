@@ -278,6 +278,8 @@ header{background:var(--brown);padding:18px 32px;display:flex;align-items:center
   .col.state-active .col-body{padding:12px 14px 14px}
 }
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -426,7 +428,21 @@ header{background:var(--brown);padding:18px 32px;display:flex;align-items:center
 </div>
 
 <script>
-const PWD='feep2026', KEY='feep_v2', FKEY='feep_files_v2';
+const PWD='feep2026';
+const KEY='feep_v2'; // kept for migration only
+const FKEY='feep_files_v2';
+
+// ── Firebase init ──
+const firebaseConfig = {
+  apiKey: "AIzaSyBjnmaXMJ4-e5uSh9EvB7KmPpTwCHm5PGA",
+  authDomain: "feep-backstage.firebaseapp.com",
+  projectId: "feep-backstage",
+  storageBucket: "feep-backstage.firebasestorage.app",
+  messagingSenderId: "369289497799",
+  appId: "1:369289497799:web:f329a3b49ba9eb97f602e2"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
 
 const STAGES=[
   {id:'briefing',   num:'01',name:'Briefing',   sub:'Questionário inicial',
@@ -444,21 +460,17 @@ const STAGES=[
 ];
 
 const CATS={
-  // internal — admin only
-  'referências':      {bg:'rgba(139,181,200,.25)',color:'#7ab5cc',  client:false, label:'referências'},
-  'moodboard':        {bg:'rgba(175,140,215,.25)',color:'#b08ad8',  client:false, label:'moodboard'},
-  'apresentação':     {bg:'rgba(80,155,105,.25)', color:'#60b87e',  client:false, label:'apresentação'},
-  'briefing':         {bg:'rgba(160,150,140,.2)', color:'#a09088',  client:false, label:'briefing'},
-  // client-facing — visible in the client link
-  'identidade visual':{bg:'rgba(205,155,60,.25)',color:'#d4a040',  client:true,  label:'identidade visual'},
-  'convite':          {bg:'rgba(205,90,70,.25)',  color:'#d47060',  client:true,  label:'convite'},
-  'save the date':    {bg:'rgba(80,155,105,.25)', color:'#60b87e',  client:true,  label:'save the date'},
-  'entrega final':    {bg:'rgba(193,219,232,.3)', color:'#5a9ab5',  client:true,  label:'entrega final'},
-  'outro':            {bg:'rgba(160,150,140,.2)', color:'#a09088',  client:false, label:'outro'},
+  'referências':      {bg:'rgba(139,181,200,.25)',color:'#7ab5cc',  client:false},
+  'moodboard':        {bg:'rgba(175,140,215,.25)',color:'#b08ad8',  client:false},
+  'apresentação':     {bg:'rgba(80,155,105,.25)', color:'#60b87e',  client:false},
+  'briefing':         {bg:'rgba(160,150,140,.2)', color:'#a09088',  client:false},
+  'identidade visual':{bg:'rgba(205,155,60,.25)', color:'#d4a040',  client:true},
+  'convite':          {bg:'rgba(205,90,70,.25)',   color:'#d47060',  client:true},
+  'save the date':    {bg:'rgba(80,155,105,.25)',  color:'#60b87e',  client:true},
+  'entrega final':    {bg:'rgba(193,219,232,.3)',  color:'#5a9ab5',  client:true},
+  'outro':            {bg:'rgba(160,150,140,.2)',  color:'#a09088',  client:false},
 };
-// helper
-function catInfo(cat){ return CATS[cat]||CATS['outro']; }
-
+function catInfo(cat){return CATS[cat]||CATS['outro'];}
 function ico(name){
   const e=name.split('.').pop().toLowerCase();
   if(['jpg','jpeg','png','gif','webp','svg'].includes(e))return'◼';
@@ -469,30 +481,59 @@ function ico(name){
   return'◇';
 }
 
-let isAdmin=false,projects=[],files={},dragId=null,activePid=null,queue=[],selCat='referências';
+let isAdmin=false, projects=[], files={}, dragId=null, activePid=null;
+let queue=[], selCat='referências', clientMode=false, clientPid=null;
+let unsubscribe=null; // firestore listener
 
-let clientMode=false;
-
-function load(){
-  const p=new URLSearchParams(location.search);
-  if(p.get('pid')){
-    try{
-      const payload=JSON.parse(decodeURIComponent(escape(atob(p.get('pid')))));
-      projects=[payload.project];
-      files=payload.files||{};
-      clientMode=true;
-      return;
-    }catch(e){}
+// ── FIRESTORE HELPERS ──
+async function fsLoadAll(){
+  const snap = await db.collection('projects').get();
+  projects = snap.docs.map(d=>({id:d.id,...d.data()}));
+  // load files for all projects
+  for(const proj of projects){
+    const fsnap = await db.collection('projects').doc(proj.id).collection('files').get();
+    files[proj.id] = fsnap.docs.map(d=>({id:d.id,...d.data()}));
   }
-  try{projects=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){projects=[]}
-  try{files=JSON.parse(localStorage.getItem(FKEY)||'{}')}catch(e){files={}}
-}
-function save(){
-  if(clientMode)return;
-  localStorage.setItem(KEY,JSON.stringify(projects));
-  localStorage.setItem(FKEY,JSON.stringify(files));
 }
 
+async function fsSaveProject(proj){
+  await db.collection('projects').doc(proj.id).set({
+    client:proj.client, date:proj.date, pkg:proj.pkg, stage:proj.stage
+  });
+}
+
+async function fsDeleteProject(id){
+  // delete files subcollection first
+  const fsnap = await db.collection('projects').doc(id).collection('files').get();
+  const batch = db.batch();
+  fsnap.docs.forEach(d=>batch.delete(d.ref));
+  batch.delete(db.collection('projects').doc(id));
+  await batch.commit();
+}
+
+async function fsSaveFile(pid, file){
+  await db.collection('projects').doc(pid).collection('files').doc(file.id).set(file);
+}
+
+async function fsDeleteFile(pid, fid){
+  await db.collection('projects').doc(pid).collection('files').doc(fid).delete();
+}
+
+// Real-time listener for a single project (client view)
+function listenProject(pid){
+  if(unsubscribe) unsubscribe();
+  unsubscribe = db.collection('projects').doc(pid).onSnapshot(async snap=>{
+    if(!snap.exists){return;}
+    const proj={id:snap.id,...snap.data()};
+    projects=[proj];
+    // load files
+    const fsnap = await db.collection('projects').doc(pid).collection('files').get();
+    files[pid] = fsnap.docs.map(d=>({id:d.id,...d.data()}));
+    render();
+  });
+}
+
+// ── ADMIN AUTH ──
 function promptAdmin(){
   if(isAdmin){exitAdmin();return;}
   document.getElementById('pwdInput').value='';
@@ -506,7 +547,9 @@ function checkPwd(){
     document.getElementById('adminBar').style.display='flex';
     document.getElementById('adminBtn').textContent='admin ativo';
     document.getElementById('adminBtn').classList.add('on');
-    setBar('admin');render();
+    setBar('admin');
+    // Load all projects fresh
+    fsLoadAll().then(()=>render());
   }else{
     document.getElementById('pwd-err').style.display='block';
     document.getElementById('pwdInput').select();
@@ -531,11 +574,11 @@ function setBar(m){
     txt.textContent='acompanhamento em tempo real';
     if(desc)desc.style.display='block';
   }else{
-    bar.style.display='none';
-    if(desc)desc.style.display='none';
+    bar.style.display='none';if(desc)desc.style.display='none';
   }
 }
 
+// ── PROJECTS CRUD ──
 function openAdd(){
   document.getElementById('iClient').value='';
   document.getElementById('iDate').value='';
@@ -543,25 +586,29 @@ function openAdd(){
   openModal('addModal');
   setTimeout(()=>document.getElementById('iClient').focus(),100);
 }
-function addProject(){
+async function addProject(){
   const c=document.getElementById('iClient').value.trim();
   const d=document.getElementById('iDate').value.trim()||'—';
   const pk=document.getElementById('iPkg').value;
   if(!c){document.getElementById('iClient').focus();return;}
   const id=Date.now().toString();
-  projects.push({id,client:c,date:d,pkg:pk,stage:'briefing'});
-  files[id]=[];save();closeModal('addModal');render();
+  const proj={id,client:c,date:d,pkg:pk,stage:'briefing'};
+  projects.push(proj);
+  files[id]=[];
+  await fsSaveProject(proj);
+  closeModal('addModal');render();
 }
-function delProject(id){
+async function delProject(id){
   const proj=projects.find(p=>p.id===id);
   if(!proj)return;
-  showConfirm('Remover projeto de '+proj.client+'?', ()=>{
+  showConfirm('Remover projeto de '+proj.client+'?', async()=>{
     projects=projects.filter(p=>p.id!==id);
-    delete files[id];save();render();
+    delete files[id];
+    await fsDeleteProject(id);
+    render();
   });
 }
-
-function showConfirm(msg, onYes){
+function showConfirm(msg,onYes){
   const ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;background:rgba(20,8,2,.65);display:flex;align-items:center;justify-content:center;z-index:500;backdrop-filter:blur(3px)';
   ov.innerHTML=`<div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:340px;width:90%;font-family:Inter,sans-serif">
@@ -576,7 +623,23 @@ function showConfirm(msg, onYes){
   ov.querySelector('#cnfYes').onclick=()=>{ov.remove();onYes();};
 }
 
-/* FILES MODAL */
+// ── SHARE — short link ──
+function shareProject(pid){
+  const proj=projects.find(p=>p.id===pid);
+  if(!proj)return;
+  const url=location.origin+location.pathname+'?pid='+pid;
+  navigator.clipboard.writeText(url)
+    .then(()=>toast('link copiado para '+proj.client+' ✓'))
+    .catch(()=>prompt('Copie o link para '+proj.client+':',url));
+}
+function toast(msg){
+  const t=document.createElement('div');
+  t.textContent=msg;
+  t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e1009;color:#C1DBE8;padding:10px 22px;border-radius:8px;font-size:12px;font-family:Inter,sans-serif;z-index:999;letter-spacing:.5px;white-space:nowrap';
+  document.body.appendChild(t);setTimeout(()=>t.remove(),2800);
+}
+
+// ── FILES MODAL ──
 function openFiles(pid){
   activePid=pid;queue=[];
   const proj=projects.find(p=>p.id===pid);
@@ -596,7 +659,6 @@ function pickCat(btn){
   const cu=document.getElementById('clientUpload');
   if(iu)iu.style.display=isClient?'none':'block';
   if(cu)cu.style.display=isClient?'block':'none';
-  if(!isClient){document.getElementById('urlName').value='';document.getElementById('urlLink').value='';}
 }
 function handleFiles(fl){
   for(const f of fl){
@@ -615,7 +677,6 @@ function renderQueue(){
   });
 }
 function rmQueue(i){queue.splice(i,1);renderQueue();}
-
 async function saveQueue(){
   if(!queue.length){closeModal('filesModal');return;}
   const bar=document.getElementById('uploadBar');
@@ -624,68 +685,75 @@ async function saveQueue(){
     bar.style.width=((i/queue.length)*90)+'%';
     try{
       const data=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(queue[i].file);});
-      files[activePid].push({id:Date.now().toString()+i,name:queue[i].file.name,cat:queue[i].cat,type:queue[i].file.type,size:queue[i].file.size,data});
+      const f={id:Date.now().toString()+i,name:queue[i].file.name,cat:queue[i].cat,type:queue[i].file.type,size:queue[i].file.size,data,isUrl:false};
+      files[activePid].push(f);
+      await fsSaveFile(activePid,f);
     }catch(e){console.error(e);}
   }
-  bar.style.width='100%';queue=[];save();
+  bar.style.width='100%';queue=[];
   setTimeout(()=>{bar.style.width='0';document.getElementById('queueList').innerHTML='';renderMfList();render();},500);
 }
-
-function delFile(pid,fid){
-  if(!files[pid])return;
-  files[pid]=files[pid].filter(f=>f.id!==fid);save();renderMfList();render();
+async function addUrlFile(){
+  const name=document.getElementById('urlName').value.trim();
+  const url=document.getElementById('urlLink').value.trim();
+  if(!name){document.getElementById('urlName').focus();return;}
+  if(!url||!url.startsWith('http')){document.getElementById('urlLink').focus();return;}
+  if(!files[activePid])files[activePid]=[];
+  const f={id:Date.now().toString(),name,cat:selCat,type:'url',size:0,data:url,isUrl:true};
+  files[activePid].push(f);
+  await fsSaveFile(activePid,f);
+  document.getElementById('urlName').value='';
+  document.getElementById('urlLink').value='';
+  renderMfList();render();
+  toast('link adicionado ✓');
 }
-
+async function delFile(pid,fid){
+  if(!files[pid])return;
+  files[pid]=files[pid].filter(f=>f.id!==fid);
+  await fsDeleteFile(pid,fid);
+  renderMfList();render();
+}
 function renderMfList(){
   const el=document.getElementById('mfList');
   const pf=files[activePid]||[];
   el.innerHTML='';
   if(!pf.length){el.innerHTML='<div class="mf-empty">nenhum arquivo anexado ainda</div>';return;}
-  pf.forEach(f=>{
+  const internal=pf.filter(f=>!catInfo(f.cat).client);
+  const clientF=pf.filter(f=>catInfo(f.cat).client);
+  const renderRow=(f)=>{
     const cc=catInfo(f.cat);
     const row=document.createElement('div');row.className='mf-row';
     row.innerHTML=`
       <div class="mf-ico" style="background:${cc.bg};color:${cc.color}">${ico(f.name)}</div>
       <div class="mf-info"><div class="mf-name">${f.name}</div><div class="mf-cat">${f.cat}</div></div>
-      <a class="mf-dl" href="${f.data}" ${f.isUrl?'target="_blank" rel="noopener"':'download="'+f.name+'"'}>${f.isUrl?'abrir link':'baixar'}</a>
+      <a class="mf-dl" href="${f.data}" ${f.isUrl?'target="_blank" rel="noopener"':'download="'+f.name+'"'}>${f.isUrl?'abrir':'baixar'}</a>
       <span class="mf-rm" onclick="delFile('${activePid}','${f.id}')">✕</span>`;
     el.appendChild(row);
-  });
+  };
+  if(internal.length){
+    el.insertAdjacentHTML('beforeend','<div style="font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:#9a8a81;margin:6px 0 4px">interno</div>');
+    internal.forEach(renderRow);
+  }
+  if(clientF.length){
+    el.insertAdjacentHTML('beforeend','<div style="font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:#3a6b48;margin:10px 0 4px">entregáveis — cliente vê</div>');
+    clientF.forEach(renderRow);
+  }
 }
 
-function shareProject(pid){
-  const proj=projects.find(p=>p.id===pid);
-  if(!proj)return;
-  // Include only URL-based client files (tiny) — binary files are NOT shared via URL
-  const clientFiles=(files[pid]||[]).filter(f=>catInfo(f.cat).client && f.isUrl);
-  const payload={pid,project:proj,files:{[pid]:clientFiles}};
-  const d=btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
-  const url=location.origin+location.pathname+'?pid='+d;
-  navigator.clipboard.writeText(url)
-    .then(()=>{
-      const msg=document.createElement('div');
-      msg.textContent='link copiado para '+proj.client+' ✓';
-      msg.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e1009;color:#C1DBE8;padding:10px 22px;border-radius:8px;font-size:12px;font-family:Inter,sans-serif;z-index:999;letter-spacing:.5px;box-shadow:0 4px 20px rgba(0,0,0,.3)';
-      document.body.appendChild(msg);
-      setTimeout(()=>msg.remove(),2800);
-    })
-    .catch(()=>prompt('Copie o link para '+proj.client+':',url));
-}
-
+// ── MODALS ──
 function openModal(id){document.getElementById(id).classList.add('show');}
 function closeModal(id){document.getElementById(id).classList.remove('show');}
 function bgClose(e,id){if(e.target===document.getElementById(id))closeModal(id);}
 
+// ── RENDER ──
 function render(){renderProg();renderBoard();}
 
 function renderProg(){
   const strip=document.getElementById('progressStrip'),track=document.getElementById('progressTrack');
-  // Only show progress bar when there's exactly 1 project (client view or single project)
   if(!projects.length){strip.style.display='none';return;}
   if(projects.length>1&&!clientMode){strip.style.display='none';return;}
   strip.style.display='block';
   const proj=projects[0],ci=STAGES.findIndex(s=>s.id===proj.stage);
-  // Show project name in bar when admin has one project
   track.innerHTML=STAGES.map((s,i)=>{
     const cls=i<ci?'s-done':i===ci?'s-active':'s-upcoming';
     const line=i<STAGES.length-1?'<div class="ps-line"></div>':'';
@@ -698,11 +766,8 @@ function renderBoard(){
   if(!projects.length&&!isAdmin){board.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
   board.innerHTML='';
-
   STAGES.forEach((stage,si)=>{
     const sp=projects.filter(p=>p.stage===stage.id);
-    // In multi-project admin view, no column gets a global "active" state
-    // State is determined per-column only in single-project (client) view
     let state='state-upcoming';
     if(clientMode&&projects.length===1){
       const ci=STAGES.findIndex(s=>s.id===projects[0].stage);
@@ -711,17 +776,39 @@ function renderBoard(){
     const chips={'state-done':'<span class="status-chip chip-done">✓ concluído</span>','state-active':'<span class="status-chip chip-active">● em andamento</span>','state-upcoming':'<span class="status-chip chip-upcoming">○ aguardando</span>'};
     const col=document.createElement('div');
     col.className=`col ${state}`;col.dataset.stage=stage.id;
+    const isLast=(si===STAGES.length-1);
+    if(isLast)col.classList.add('last-col');
     col.innerHTML=`
-      <div class="col-head"><div class="col-num">${stage.num}</div><div class="col-name">${stage.name}</div><div class="col-sub">${stage.sub}</div>${chips[state]}</div>
-      <div class="col-body"><p class="emily">${stage.emily}</p>${stage.time ? `<span class="duration">${stage.time}</span>` : ''}
+      <div class="col-head" onclick="toggleCol(this)">
+        <div class="col-head-left">
+          <div>
+            <div class="col-num">${stage.num}</div>
+            <div class="col-name">${stage.name}</div>
+            <div class="col-sub">${stage.sub}</div>
+          </div>
+        </div>
+        <div class="col-head-right">
+          ${chips[state]}
+          <div class="col-chevron">▾</div>
+        </div>
+      </div>
+      <div class="col-body"><p class="emily">${stage.emily}</p>${stage.time?`<span class="duration">${stage.time}</span>`:''}
         <div class="drop-zone" data-stage="${stage.id}">${sp.length===0&&isAdmin?'<div class="drop-hint">solte aqui</div>':''}</div>
       </div>`;
     const zone=col.querySelector('.drop-zone');
     zone.addEventListener('dragover',e=>{if(!isAdmin)return;e.preventDefault();zone.classList.add('has-hover');});
     zone.addEventListener('dragleave',()=>zone.classList.remove('has-hover'));
-    zone.addEventListener('drop',e=>{
+    zone.addEventListener('drop',async e=>{
       if(!isAdmin)return;e.preventDefault();zone.classList.remove('has-hover');
-      if(dragId){const proj=projects.find(p=>p.id===dragId);if(proj){proj.stage=stage.id;save();render();}}
+      if(dragId){
+        const proj=projects.find(p=>p.id===dragId);
+        if(proj){
+          proj.stage=stage.id;
+          await fsSaveProject(proj); // ← saves to Firebase
+          render();
+          toast(proj.client+' movido para '+stage.name);
+        }
+      }
     });
     sp.forEach(proj=>{zone.querySelector('.drop-hint')&&zone.querySelector('.drop-hint').remove();zone.appendChild(mkCard(proj));});
     board.appendChild(col);
@@ -733,10 +820,7 @@ function mkCard(proj){
   card.className=isAdmin?'card admin-card':'card';
   card.draggable=isAdmin;card.dataset.id=proj.id;
   const allFiles=files[proj.id]||[];
-  // In client view: only show client-facing files
-  const pf=clientMode ? allFiles.filter(f=>catInfo(f.cat).client) : allFiles;
-
-  // TOP
+  const pf=clientMode?allFiles.filter(f=>catInfo(f.cat).client):allFiles;
   const top=document.createElement('div');top.className='card-top';
   top.innerHTML=`
     <div class="card-name">${proj.client}</div>
@@ -746,34 +830,17 @@ function mkCard(proj){
       ${isAdmin?`<div style="display:flex;gap:8px;align-items:center">
         <span style="font-size:10px;color:rgba(193,219,232,.55);cursor:pointer;transition:.15s;padding:2px 7px;border:1px solid rgba(193,219,232,.2);border-radius:4px" onmouseenter="this.style.color='#C1DBE8';this.style.borderColor='rgba(193,219,232,.5)'" onmouseleave="this.style.color='rgba(193,219,232,.55)';this.style.borderColor='rgba(193,219,232,.2)'" onclick="event.stopPropagation();shareProject('${proj.id}')">↗ link</span>
         <span class="card-del" onclick="event.stopPropagation();delProject('${proj.id}')">remover</span>
-      </div>`:''}
-    </div>`;
-
-  // FILES SECTION
+      </div>`:''}</div>`;
   const fs=document.createElement('div');fs.className='card-files';
   const clientCount=allFiles.filter(f=>catInfo(f.cat).client).length;
   const internalCount=allFiles.filter(f=>!catInfo(f.cat).client).length;
-  const countLabel=allFiles.length
-    ? (isAdmin
-        ? `<span style="font-size:9px;color:rgba(193,219,232,.35);margin-left:4px">${internalCount} int · ${clientCount} cli</span>`
-        : clientCount ? `(${clientCount})` : '')
-    : '';
+  const countLabel=allFiles.length?(isAdmin?`<span style="font-size:9px;color:rgba(193,219,232,.35);margin-left:4px">${internalCount} int · ${clientCount} cli</span>`:clientCount?`(${clientCount})`:''):'';
   const hdr=document.createElement('div');hdr.className='files-header';
-  hdr.innerHTML=`
-    <span class="files-label">arquivos ${countLabel}</span>
-    ${isAdmin?`<span class="files-manage" onclick="event.stopPropagation();openFiles('${proj.id}')">+ gerenciar</span>`:''}`;
+  hdr.innerHTML=`<span class="files-label">arquivos ${countLabel}</span>${isAdmin?`<span class="files-manage" onclick="event.stopPropagation();openFiles('${proj.id}')">+ gerenciar</span>`:''}`;
   fs.appendChild(hdr);
-
   if(!pf.length){
-    if(isAdmin){
-      const btn=document.createElement('button');btn.className='btn-attach';
-      btn.innerHTML='⊕ anexar referências, moodboard e arquivos';
-      btn.onclick=e=>{e.stopPropagation();openFiles(proj.id);};
-      fs.appendChild(btn);
-    }else{
-      const nf=document.createElement('div');nf.className='no-files';nf.textContent='materiais de entrega em breve';
-      fs.appendChild(nf);
-    }
+    if(isAdmin){const btn=document.createElement('button');btn.className='btn-attach';btn.innerHTML='⊕ anexar referências, moodboard e arquivos';btn.onclick=e=>{e.stopPropagation();openFiles(proj.id);};fs.appendChild(btn);}
+    else{const nf=document.createElement('div');nf.className='no-files';nf.textContent='materiais de entrega em breve';fs.appendChild(nf);}
   }else{
     const shown=pf.slice(0,4);
     shown.forEach(f=>{
@@ -785,15 +852,8 @@ function mkCard(proj){
       row.innerHTML=`<div class="file-ico" style="background:${cc.bg};color:${cc.color}">${ico(f.name)}</div><span class="file-nm">${f.name}</span><span class="file-ct">${f.isUrl?'↗ '+f.cat:f.cat}</span>`;
       fs.appendChild(row);
     });
-    if(pf.length>4){
-      const more=document.createElement('div');
-      more.style.cssText='font-size:10.5px;color:rgba(193,219,232,.4);text-align:center;padding:5px 0';
-      more.textContent=`+ ${pf.length-4} arquivo(s)`;
-      if(isAdmin){more.style.cursor='pointer';more.onclick=e=>{e.stopPropagation();openFiles(proj.id);};}
-      fs.appendChild(more);
-    }
+    if(pf.length>4){const more=document.createElement('div');more.style.cssText='font-size:10.5px;color:rgba(193,219,232,.4);text-align:center;padding:5px 0';more.textContent=`+ ${pf.length-4} arquivo(s)`;if(isAdmin){more.style.cursor='pointer';more.onclick=e=>{e.stopPropagation();openFiles(proj.id);};}fs.appendChild(more);}
   }
-
   card.appendChild(top);card.appendChild(fs);
   card.addEventListener('dragstart',e=>{if(!isAdmin){e.preventDefault();return;}dragId=proj.id;card.classList.add('dragging');e.dataTransfer.effectAllowed='move';});
   card.addEventListener('dragend',()=>{card.classList.remove('dragging');dragId=null;});
@@ -802,29 +862,42 @@ function mkCard(proj){
 
 function toggleCol(head){
   const col=head.parentElement;
-  // On mobile, active col stays open; others toggle
   if(col.classList.contains('state-active'))return;
   col.classList.toggle('expanded');
 }
 
-/* INIT */
-load();
-if(clientMode){
-  document.getElementById('adminBtn').style.display='none';
-}
-if(!projects.length&&!clientMode){
-  const id='demo1';
-  projects=[{id,client:'Silvia Matos',date:'30/05/2026',pkg:'Plus',stage:'moodboard'}];
-  files[id]=[];save();
-}
-if(projects.length){setBar('client');document.getElementById('progressStrip').style.display='block';}
-render();
+// ── INIT ──
+async function init(){
+  const p=new URLSearchParams(location.search);
+  const pid=p.get('pid');
 
-/* UPLOAD DRAG ON BOX */
+  if(pid){
+    // CLIENT VIEW — real-time listener
+    clientMode=true;
+    clientPid=pid;
+    document.getElementById('adminBtn').style.display='none';
+    setBar('client');
+    document.getElementById('progressStrip').style.display='block';
+    // Show loading
+    document.getElementById('board').innerHTML='<div style="padding:40px 32px;color:#9a8a81;font-size:13px">carregando...</div>';
+    listenProject(pid);
+  }else{
+    // ADMIN HOME — load from Firestore
+    setBar('client');
+    await fsLoadAll();
+    if(projects.length) document.getElementById('progressStrip').style.display='block';
+    render();
+  }
+}
+init();
+
+// Upload drag-on-box
 const ub=document.getElementById('uploadBox');
-ub.addEventListener('dragover',e=>{e.preventDefault();ub.classList.add('on');});
-ub.addEventListener('dragleave',()=>ub.classList.remove('on'));
-ub.addEventListener('drop',e=>{e.preventDefault();ub.classList.remove('on');handleFiles(e.dataTransfer.files);});
+if(ub){
+  ub.addEventListener('dragover',e=>{e.preventDefault();ub.classList.add('on');});
+  ub.addEventListener('dragleave',()=>ub.classList.remove('on'));
+  ub.addEventListener('drop',e=>{e.preventDefault();ub.classList.remove('on');handleFiles(e.dataTransfer.files);});
+}
 </script>
 </body>
 </html>
