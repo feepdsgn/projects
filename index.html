@@ -349,6 +349,28 @@ header{background:var(--brown);padding:18px 32px;display:flex;align-items:center
   </div>
 </div>
 
+<!-- EDIT PROJECT MODAL -->
+<div class="overlay" id="editModal" onclick="bgClose(event,'editModal')">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-title">editar projeto</div>
+    <div class="modal-sub" id="editSub"></div>
+    <input type="hidden" id="editId">
+    <label class="field-label">nome da debutante</label>
+    <input type="text" id="editClient" placeholder="Ex: Silvia Matos">
+    <label class="field-label">data da festa</label>
+    <input type="text" id="editDate" placeholder="Ex: 30/05/2026">
+    <label class="field-label">pacote</label>
+    <select id="editPkg">
+      <option>Basic</option><option>Motion</option><option>Plus</option>
+    </select>
+    <div id="edit-err" style="display:none;color:#b74040;font-size:12px;margin-top:8px;padding:8px 12px;background:#fdf0f0;border-radius:6px"></div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="closeModal('editModal')">cancelar</button>
+      <button class="btn btn-primary" onclick="saveEdit()">salvar</button>
+    </div>
+  </div>
+</div>
+
 <!-- FILES MODAL -->
 <div class="overlay" id="filesModal" onclick="bgClose(event,'filesModal')">
   <div class="modal" style="max-width:520px">
@@ -661,6 +683,43 @@ function showConfirm(msg,onYes){
 }
 
 // ── SHARE — short link ──
+function openEdit(pid){
+  const proj=projects.find(p=>p.id===pid);
+  if(!proj)return;
+  document.getElementById('editId').value=pid;
+  document.getElementById('editClient').value=proj.client;
+  document.getElementById('editDate').value=proj.date==='—'?'':proj.date;
+  document.getElementById('editPkg').value=proj.pkg;
+  document.getElementById('editSub').textContent='projeto '+proj.client;
+  document.getElementById('edit-err').style.display='none';
+  openModal('editModal');
+  setTimeout(()=>document.getElementById('editClient').focus(),100);
+}
+
+async function saveEdit(){
+  const id=document.getElementById('editId').value;
+  const c=document.getElementById('editClient').value.trim();
+  const d=document.getElementById('editDate').value.trim()||'—';
+  const pk=document.getElementById('editPkg').value;
+  if(!c){document.getElementById('editClient').focus();return;}
+  const btn=document.querySelector('#editModal .btn-primary');
+  btn.textContent='salvando...';btn.disabled=true;
+  try{
+    const proj=projects.find(p=>p.id===id);
+    if(!proj)return;
+    proj.client=c;proj.date=d;proj.pkg=pk;
+    await fsSaveProject(proj);
+    closeModal('editModal');
+    render();
+    toast('projeto atualizado ✓');
+  }catch(err){
+    document.getElementById('edit-err').style.display='block';
+    document.getElementById('edit-err').textContent='erro: '+err.message;
+  }finally{
+    btn.textContent='salvar';btn.disabled=false;
+  }
+}
+
 function shareProject(pid){
   const proj=projects.find(p=>p.id===pid);
   if(!proj)return;
@@ -873,8 +932,9 @@ function mkCard(proj){
     <div class="card-date">${proj.date}</div>
     <div class="card-foot">
       <span class="card-pkg">${proj.pkg}</span>
-      ${isAdmin?`<div style="display:flex;gap:8px;align-items:center">
+      ${isAdmin?`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <span style="font-size:10px;color:rgba(193,219,232,.55);cursor:pointer;transition:.15s;padding:2px 7px;border:1px solid rgba(193,219,232,.2);border-radius:4px" onmouseenter="this.style.color='#C1DBE8';this.style.borderColor='rgba(193,219,232,.5)'" onmouseleave="this.style.color='rgba(193,219,232,.55)';this.style.borderColor='rgba(193,219,232,.2)'" onclick="event.stopPropagation();shareProject('${proj.id}')">↗ link</span>
+        <span style="font-size:10px;color:rgba(193,219,232,.55);cursor:pointer;transition:.15s;padding:2px 7px;border:1px solid rgba(193,219,232,.2);border-radius:4px" onmouseenter="this.style.color='#C1DBE8';this.style.borderColor='rgba(193,219,232,.5)'" onmouseleave="this.style.color='rgba(193,219,232,.55)';this.style.borderColor='rgba(193,219,232,.2)'" onclick="event.stopPropagation();openEdit('${proj.id}')">✎ editar</span>
         <span class="card-del" onclick="event.stopPropagation();delProject('${proj.id}')">remover</span>
       </div>`:''}</div>`;
   const fs=document.createElement('div');fs.className='card-files';
