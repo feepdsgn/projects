@@ -527,13 +527,33 @@ async function fsDeleteFile(pid, fid){
 // Real-time listener for a single project (client view)
 async function listenProject(pid){
   if(unsubscribe) unsubscribe();
+  // First load synchronously so we can show something fast
+  try{
+    const snap = await db.collection('projects').doc(pid).get();
+    if(snap.exists){
+      projects=[{id:snap.id,...snap.data()}];
+      const fsnap = await db.collection('projects').doc(pid).collection('files').get();
+      files[pid]=fsnap.docs.map(d=>({id:d.id,...d.data()}));
+      showLoading(false);
+      render();
+    }else{
+      showLoading(false);
+      showBoardError('Projeto não encontrado. Verifique o link.');
+      return;
+    }
+  }catch(err){
+    showLoading(false);
+    showBoardError('Erro ao carregar: '+err.message);
+    return;
+  }
+  // Then set up real-time listener for updates
   unsubscribe = db.collection('projects').doc(pid).onSnapshot(async snap=>{
-    if(!snap.exists){return;}
-    const proj={id:snap.id,...snap.data()};
-    projects=[proj];
-    // load files
-    const fsnap = await db.collection('projects').doc(pid).collection('files').get();
-    files[pid] = fsnap.docs.map(d=>({id:d.id,...d.data()}));
+    if(!snap.exists) return;
+    projects=[{id:snap.id,...snap.data()}];
+    try{
+      const fsnap = await db.collection('projects').doc(pid).collection('files').get();
+      files[pid]=fsnap.docs.map(d=>({id:d.id,...d.data()}));
+    }catch(e){}
     render();
   });
 }
@@ -789,8 +809,8 @@ function renderProg(){
 
 function renderBoard(){
   const board=document.getElementById('board'),empty=document.getElementById('emptyState');
-  if(!projects.length&&!isAdmin){board.innerHTML='';empty.style.display='block';return;}
-  empty.style.display='none';
+  // Always show columns — never blank. Empty state only when explicitly no projects AND not loading
+  if(empty) empty.style.display='none';
   board.innerHTML='';
   STAGES.forEach((stage,si)=>{
     const sp=projects.filter(p=>p.stage===stage.id);
@@ -897,24 +917,64 @@ async function init(){
   const p=new URLSearchParams(location.search);
   const pid=p.get('pid');
 
+  // Always render columns immediately so page never looks blank
+  render();
+
   if(pid){
-    // CLIENT VIEW — real-time listener
     clientMode=true;
     clientPid=pid;
     document.getElementById('adminBtn').style.display='none';
     setBar('client');
-    document.getElementById('progressStrip').style.display='block';
-    // Show loading
-    document.getElementById('board').innerHTML='<div style="padding:40px 32px;color:#9a8a81;font-size:13px">carregando...</div>';
-    listenProject(pid);
+    showLoading(true);
+    try{
+      await listenProject(pid);
+    }catch(err){
+      showLoading(false);
+      showBoardError('Erro ao carregar projeto: '+err.message);
+    }
   }else{
-    // ADMIN HOME — load from Firestore
-    setBar('client');
-    await fsLoadAll();
-    if(projects.length) document.getElementById('progressStrip').style.display='block';
-    render();
+    showLoading(true);
+    try{
+      await fsLoadAll();
+      showLoading(false);
+      if(projects.length) document.getElementById('progressStrip').style.display='block';
+      render();
+    }catch(err){
+      showLoading(false);
+      showBoardError('Erro ao conectar com o banco de dados.<br>Verifique as regras do Firestore: <code>allow read, write: if true;</code>');
+    }
   }
 }
+
+function showLoading(on){
+  let el=document.getElementById('loadingBar');
+  if(on){
+    if(!el){
+      el=document.createElement('div');
+      el.id='loadingBar';
+      el.style.cssText='position:fixed;top:0;left:0;width:100%;height:3px;background:linear-gradient(90deg,var(--ice),var(--ice-dark));z-index:999;animation:loadingAnim 1.2s ease-in-out infinite';
+      document.body.appendChild(el);
+      if(!document.getElementById('loadingKeyframes')){
+        const s=document.createElement('style');
+        s.id='loadingKeyframes';
+        s.textContent='@keyframes loadingAnim{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}';
+        document.head.appendChild(s);
+      }
+    }
+  }else{
+    if(el)el.remove();
+  }
+}
+
+function showBoardError(msg){
+  document.getElementById('board').innerHTML=`
+    <div style="padding:32px;font-family:Inter,sans-serif;max-width:500px">
+      <div style="background:#fdf0f0;border:1px solid #f0c0c0;border-radius:10px;padding:20px 24px;color:#a03030;font-size:13px;line-height:1.8">
+        ${msg}
+      </div>
+    </div>`;
+}
+
 init();
 
 // Upload drag-on-box
