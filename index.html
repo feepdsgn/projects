@@ -615,7 +615,7 @@ async function addProject(){
     btn.textContent='criar projeto';btn.disabled=false;
   }
 }
-async async function delProject(id){
+async function delProject(id){
   const proj=projects.find(p=>p.id===id);
   if(!proj)return;
   showConfirm('Remover projeto de '+proj.client+'?', async()=>{
@@ -694,7 +694,7 @@ function renderQueue(){
   });
 }
 function rmQueue(i){queue.splice(i,1);renderQueue();}
-async async function saveQueue(){
+async function saveQueue(){
   if(!queue.length){closeModal('filesModal');return;}
   const bar=document.getElementById('uploadBar');
   if(!files[activePid])files[activePid]=[];
@@ -710,7 +710,7 @@ async async function saveQueue(){
   bar.style.width='100%';queue=[];
   setTimeout(()=>{bar.style.width='0';document.getElementById('queueList').innerHTML='';renderMfList();render();},500);
 }
-async async function addUrlFile(){
+async function addUrlFile(){
   const name=document.getElementById('urlName').value.trim();
   const url=document.getElementById('urlLink').value.trim();
   if(!name){document.getElementById('urlName').focus();return;}
@@ -733,7 +733,7 @@ async async function addUrlFile(){
     if(addBtn){addBtn.textContent='+ adicionar link';addBtn.disabled=false;}
   }
 }
-async async function delFile(pid,fid){
+async function delFile(pid,fid){
   if(!files[pid])return;
   files[pid]=files[pid].filter(f=>f.id!==fid);
   await fsDeleteFile(pid,fid);
