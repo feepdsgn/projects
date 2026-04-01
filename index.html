@@ -389,10 +389,12 @@ header{background:var(--brown);padding:18px 32px;display:flex;align-items:center
       </div>
       <div style="font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:#3a6b48;margin-bottom:6px">entregável — cliente vê</div>
       <div class="cat-pills">
-        <button class="cat-pill" data-cat="identidade visual" onclick="pickCat(this)" style="border-color:#b5d4b8;color:#3a6b48">identidade visual</button>
-        <button class="cat-pill" data-cat="convite"           onclick="pickCat(this)" style="border-color:#b5d4b8;color:#3a6b48">convite</button>
-        <button class="cat-pill" data-cat="save the date"     onclick="pickCat(this)" style="border-color:#b5d4b8;color:#3a6b48">save the date</button>
-        <button class="cat-pill" data-cat="entrega final"     onclick="pickCat(this)" style="border-color:#b5d4b8;color:#3a6b48">entrega final</button>
+        <button class="cat-pill" data-cat="moodboard aprovado" onclick="pickCat(this)" style="border-color:#c9b0e8;color:#7b4db5">moodboard</button>
+        <button class="cat-pill" data-cat="apresentação IDV"   onclick="pickCat(this)" style="border-color:#dfc080;color:#9a6e20">apresentação IDV</button>
+        <button class="cat-pill" data-cat="identidade visual"  onclick="pickCat(this)" style="border-color:#b5d4b8;color:#3a6b48">identidade visual</button>
+        <button class="cat-pill" data-cat="convite"            onclick="pickCat(this)" style="border-color:#b5d4b8;color:#3a6b48">convite</button>
+        <button class="cat-pill" data-cat="save the date"      onclick="pickCat(this)" style="border-color:#b5d4b8;color:#3a6b48">save the date</button>
+        <button class="cat-pill" data-cat="entrega final"      onclick="pickCat(this)" style="border-color:#b5d4b8;color:#3a6b48">entrega final</button>
       </div>
     </div>
 
@@ -480,6 +482,8 @@ const CATS={
   'moodboard':        {bg:'rgba(175,140,215,.25)',color:'#b08ad8',  client:false},
   'apresentação':     {bg:'rgba(80,155,105,.25)', color:'#60b87e',  client:false},
   'briefing':         {bg:'rgba(160,150,140,.2)', color:'#a09088',  client:false},
+  'moodboard aprovado':{bg:'rgba(175,140,215,.3)', color:'#9b6fd4',  client:true},
+  'apresentação IDV': {bg:'rgba(205,155,60,.3)',  color:'#c49030',  client:true},
   'identidade visual':{bg:'rgba(205,155,60,.25)', color:'#d4a040',  client:true},
   'convite':          {bg:'rgba(205,90,70,.25)',   color:'#d47060',  client:true},
   'save the date':    {bg:'rgba(80,155,105,.25)',  color:'#60b87e',  client:true},
